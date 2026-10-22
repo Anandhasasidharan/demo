@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>How it works — Automated Patching (technical detail)</title>
+<meta name="description" content="Technical deep dive: patch generation, validation gate, prioritisation scoring, metrics, requirements and threats to validity for an automated CVE patching pipeline." />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23071018'/%3E%3Ccircle cx='16' cy='16' r='7' fill='none' stroke='%233DDC97' stroke-width='2.5'/%3E%3Ccircle cx='16' cy='16' r='2.4' fill='%2338BDF8'/%3E%3C/svg%3E" />
+<style>
+  :root{
+    --bg:#05080F; --panel:#0B1322; --panel2:#0E1830; --line:#1C2A44;
+    --ink:#E6EDF8; --muted:#93A3BE; --dim:#6C7C97;
+    --blue:#4C8DFF; --violet:#A78BFA; --cyan:#38BDF8; --amber:#FFB454; --green:#3DDC97; --red:#FF5D6C;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:"Segoe UI",system-ui,-apple-system,Inter,Arial,sans-serif;line-height:1.65;
+    -webkit-font-smoothing:antialiased}
+  a{color:#7FB0FF;text-decoration:none;border-bottom:1px solid rgba(127,176,255,.35)}
+  a:hover{border-bottom-color:#7FB0FF}
+  code{background:rgba(90,130,190,.14);border:1px solid rgba(90,130,190,.25);
+    padding:1.5px 6px;border-radius:5px;font-size:.88em;color:#A8C8FF;
+    font-family:"Cascadia Code",Consolas,monospace}
+
+  .topbar{position:sticky;top:0;z-index:20;backdrop-filter:blur(12px);
+    background:rgba(5,8,15,.85);border-bottom:1px solid var(--line)}
+  .topbar .inner{max-width:1180px;margin:0 auto;padding:12px 24px;display:flex;
+    align-items:center;justify-content:space-between;gap:16px}
+  .brand{font-size:13px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+  .brand b{color:var(--ink);letter-spacing:0;text-transform:none;font-size:14px}
+  .navlinks{display:flex;gap:10px}
+  .navlinks a{font-size:12.5px;padding:7px 13px;border-radius:8px;border:1px solid var(--line);
+    color:#CFDCEE;background:rgba(16,28,48,.6);border-bottom:1px solid var(--line)}
+  .navlinks a:hover{background:rgba(30,55,95,.8);color:#fff}
+  .navlinks a.primary{background:linear-gradient(180deg,rgba(61,220,151,.18),rgba(61,220,151,.06));
+    border-color:rgba(61,220,151,.4);color:#B8F5DC}
+
+  .layout{max-width:1180px;margin:0 auto;display:grid;grid-template-columns:250px 1fr;gap:48px;padding:44px 24px 100px}
+  @media(max-width:980px){.layout{grid-template-columns:1fr;gap:24px}.toc{display:none}}
+
+  /* toc */
+  .toc{position:sticky;top:84px;align-self:start;font-size:12.5px}
+  .toc h4{margin:0 0 10px;font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--dim)}
+  .toc a{display:block;color:var(--muted);padding:5px 10px;border-radius:7px;border:none;
+    border-left:2px solid transparent;margin-bottom:1px}
+  .toc a:hover{color:#fff;background:rgba(70,110,170,.12);border-left-color:var(--blue)}
+
+  /* content */
+  .hero{margin-bottom:40px}
+  .kicker{font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--blue);margin:0 0 10px}
+  h1{margin:0 0 12px;font-size:clamp(30px,4vw,46px);line-height:1.08;letter-spacing:-.025em}
+  .lede{font-size:17px;color:#B9C8DE;margin:0;max-width:720px}
+
+  section{margin-top:54px;scroll-margin-top:86px}
+  h2{font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:#6E9CE0;margin:0 0 6px;font-weight:700}
+  h2 + .h{font-size:26px;font-weight:700;letter-spacing:-.02em;margin:0 0 16px;color:#fff}
+  h3{font-size:16.5px;margin:26px 0 8px;color:#EAF1FB}
+  p{color:#BECCE1;margin:0 0 12px}
+  ul,ol{color:#BECCE1;padding-left:20px;margin:0 0 14px}
+  li{margin:5px 0}
+  strong{color:#fff}
+
+  .card{background:linear-gradient(180deg,var(--panel) 0%,#080F1C 100%);
+    border:1px solid var(--line);border-radius:14px;padding:20px 22px;margin:16px 0}
+  .card.tight{padding:16px 18px}
+  .card h4{margin:0 0 8px;font-size:14px;color:#E3ECF9}
+  .card .meta{font-size:12px;color:var(--dim);letter-spacing:.04em;text-transform:uppercase;margin-bottom:10px}
+
+  .stageCard{border-left:3px solid var(--blue)}
+  .stageCard.s2{border-left-color:var(--violet)}
+  .stageCard.s3{border-left-color:var(--cyan)}
+  .stageCard.s4{border-left-color:var(--amber)}
+  .stageCard.s5{border-left-color:var(--green)}
+
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+  @media(max-width:760px){.grid2,.grid3{grid-template-columns:1fr}}
+
+  table{width:100%;border-collapse:collapse;font-size:13.5px;background:#080F1C;
+    border:1px solid var(--line);border-radius:12px;overflow:hidden;margin:14px 0}
+  th{background:#101B31;color:#9FBBE6;text-align:left;padding:11px 13px;font-size:11px;
+    letter-spacing:.09em;text-transform:uppercase;font-weight:600}
+  td{padding:11px 13px;border-top:1px solid #16223A;color:#C3D2E6;vertical-align:top}
+  tr:nth-child(even) td{background:#0A1222}
+  td code{white-space:nowrap}
+
+  pre{background:#070E1A;border:1px solid #17233B;border-radius:11px;padding:16px 18px;
+    overflow-x:auto;font-size:13px;line-height:1.55;color:#B7CBE8;margin:12px 0;
+    font-family:"Cascadia Code",Consolas,monospace}
+  pre .c{color:#5E7595}
+  pre .k{color:#7FB0FF}
+  pre .s{color:#8FE3B0}
+  pre .n{color:#FFB454}
+
+  .callout{border-left:3px solid var(--amber);background:rgba(255,180,84,.06);
+    padding:14px 18px;border-radius:0 10px 10px 0;margin:16px 0;font-size:14px;color:#D8C7A8}
+  .callout.good{border-left-color:var(--green);background:rgba(61,220,151,.06);color:#B8E8D3}
+  .callout.bad{border-left-color:var(--red);background:rgba(255,93,108,.06);color:#F2C0C5}
+  .callout b{color:#fff}
+
+  .formula{background:#0A1322;border:1px solid #1B2A45;border-radius:12px;padding:18px 20px;
+    font-family:"Cascadia Code",Consolas,monospace;font-size:14px;color:#D6E4F8;
+    overflow-x:auto;margin:14px 0;line-height:2}
+  .formula .w{color:#7FB0FF}
+  .formula .new{color:#6FE3A6;font-weight:700}
+  .formula .note{color:#6C7C97;font-family:"Segoe UI",sans-serif;font-size:12.5px;line-height:1.5;display:block;margin-top:8px}
+
+  .pill{display:inline-block;font-size:10.5px;font-weight:700;letter-spacing:.06em;
+    padding:2px 8px;border-radius:999px;vertical-align:middle;margin-left:6px}
+  .pill.new{background:rgba(61,220,151,.14);color:#5FE3AC;border:1px solid rgba(61,220,151,.3)}
+  .pill.keep{background:rgba(76,141,255,.12);color:#8FB8FF;border:1px solid rgba(76,141,255,.3)}
+  .pill.out{background:rgba(255,93,108,.12);color:#FF8D99;border:1px solid rgba(255,93,108,.3)}
+
+  .ref{font-size:13px;color:#A9B8CE;margin:8px 0;padding-left:26px;text-indent:-26px}
+
+  footer{max-width:1180px;margin:0 auto;padding:28px 24px 60px;border-top:1px solid var(--line);
+    color:var(--dim);font-size:12.5px;display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap}
+
+  @media print{
+    body{background:#fff;color:#111}
+    .topbar,.toc,footer{display:none}
+    .layout{display:block;max-width:none;padding:0}
+    .card,table,pre,.formula{border-color:#ccc;background:#fff;color:#111}
+    td,th{color:#111;background:#fff!important}
+    h1,h2+.h,h3,.card h4,strong{color:#111}
+    p,li,.lede{color:#222}
+    section{page-break-inside:avoid}
+  }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="inner">
+    <div class="brand"><b>Automated Patching</b> · technical detail</div>
+    <div class="navlinks">
+      <a href="./index.html">← 3D demo</a>
+      <a class="primary" href="https://doi.org/10.1016/j.eswa.2023.119734" target="_blank" rel="noopener">Base paper</a>
+    </div>
+  </div>
+</div>
+
+<div class="layout">
+  <aside class="toc">
+    <h4>Contents</h4>
+    <a href="#problem">1 · The problem</a>
+    <a href="#gap">2 · The gap</a>
+    <a href="#pipeline">3 · Pipeline</a>
+    <a href="#stages">4 · Stage by stage</a>
+    <a href="#gate">5 · Validation gate</a>
+    <a href="#score">6 · Scoring and ranking</a>
+    <a href="#metrics">7 · Metrics</a>
+    <a href="#requirements">8 · Requirements</a>
+    <a href="#scope">9 · Scope</a>
+    <a href="#threats">10 · Threats to validity</a>
+    <a href="#refs">11 · References</a>
+  </aside>
+
+  <main>
+    <div class="hero">
+      <p class="kicker">Technical detail</p>
+      <h1>How a CVE becomes a proven patch</h1>
+      <p class="lede">The demo on the previous page is an abstraction. This page is the mechanism: what each stage computes, what can go wrong, what is measured, and what the work deliberately does not cover.</p>
+    </div>
+
+    <!-- 1 -->
+    <section id="problem">
+      <h2>Section 1</h2>
+      <div class="h">The problem is no longer finding vulnerabilities</div>
+      <p>Organisations do not lack vulnerability data. A scanner produces hundreds of findings per week. What they lack is the capacity to turn findings into <em>shipped, verified fixes</em>. Vendors keep compressing the window in which a fix is expected:</p>
+      <ul>
+        <li><strong>Ubuntu Livepatch</strong> applies critical kernel fixes without a reboot; Arm64 support arrives with 26.04 LTS.</li>
+        <li><strong>Windows Autopatch</strong> enables hotpatching by default in 2026 — monthly security fixes without a restart.</li>
+        <li><strong>Chrome</strong> moved from a four-week to a two-week major cycle, with weekly security releases; its patch gap fell from roughly 35 days to about 15.</li>
+      </ul>
+      <p>When the expected turnaround is days, a monthly human triage-and-patch cycle cannot keep up. Automation is not a convenience; it is the only way to fit inside the window.</p>
+    </section>
+
+    <!-- 2 -->
+    <section id="gap">
+      <h2>Section 2</h2>
+      <div class="h">Two literatures that never meet</div>
+      <div class="grid2">
+        <div class="card tight">
+          <div class="meta">Prioritisation</div>
+          <h4>Decides what to fix — then stops</h4>
+          <p style="margin:0">Deep VULMAN (2023) uses deep reinforcement learning plus an integer program to choose which CVEs to mitigate and how much staff time to allocate. Its output is a ranked list for humans. No patch is generated, validated, or deployed.</p>
+        </div>
+        <div class="card tight">
+          <div class="meta">Repair</div>
+          <h4>Writes fixes — for whatever it is given</h4>
+          <p style="margin:0">AIBugHunter (2024) and code-language-model work (2025) generate candidate fixes for vulnerable functions. The input is taken as given: there is no organisational queue, no exploitability context, no deployment step.</p>
+        </div>
+      </div>
+      <p>The consequence, stated by recent reviews: the end-to-end lifecycle is an open problem. Nothing measures the operational question — <strong>how many validated patches per unit of review capacity</strong>.</p>
+
+      <table>
+        <tr><th>Work</th><th>Prioritises</th><th>Generates</th><th>Validates</th><th>Journal</th></tr>
+        <tr><td>Deep VULMAN, 2023</td><td>Yes (DRL)</td><td>No</td><td>No</td><td>Yes</td></tr>
+        <tr><td>AIBugHunter, 2024</td><td>No</td><td>Yes</td><td>Partial (IDE)</td><td>Yes</td></tr>
+        <tr><td>Bhandari et al., 2025</td><td>No</td><td>Yes (LLM)</td><td>No</td><td>Yes</td></tr>
+        <tr><td>PatchWeaver, 2026</td><td>Partial</td><td>Partial</td><td>Partial</td><td>No (conference)</td></tr>
+        <tr><td><strong>This work</strong></td><td>Yes (base)</td><td>Yes</td><td>Yes</td><td>Target</td></tr>
+      </table>
+    </section>
+
+    <!-- 3 -->
+    <section id="pipeline">
+      <h2>Section 3</h2>
+      <div class="h">The pipeline</div>
+      <svg viewBox="0 0 900 190" width="100%" role="img" aria-label="Pipeline diagram: ingest, prioritise, generate, validate, ship">
+        <defs>
+          <marker id="a" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+            <path d="M0,0 L7,3 L0,6 Z" fill="#4C8DFF"/>
+          </marker>
+        </defs>
+        <rect x="0" y="0" width="900" height="190" fill="none"/>
+        <g font-family="Segoe UI, Arial" text-anchor="middle">
+          <rect x="18" y="52" width="140" height="72" rx="10" fill="#0B1526" stroke="#4C8DFF" stroke-width="2"/>
+          <text x="88" y="80" fill="#E6EDF8" font-size="13" font-weight="700">Ingest</text>
+          <text x="88" y="99" fill="#93A3BE" font-size="11">CVE · CVSS · EPSS</text>
+          <text x="88" y="114" fill="#93A3BE" font-size="11">CWE · asset</text>
+
+          <rect x="186" y="52" width="140" height="72" rx="10" fill="#0B1526" stroke="#A78BFA" stroke-width="2"/>
+          <text x="256" y="80" fill="#E6EDF8" font-size="13" font-weight="700">Prioritise</text>
+          <text x="256" y="99" fill="#93A3BE" font-size="11">expected value</text>
+          <text x="256" y="114" fill="#93A3BE" font-size="11">per review-hour</text>
+
+          <rect x="354" y="52" width="140" height="72" rx="10" fill="#0B1526" stroke="#38BDF8" stroke-width="2"/>
+          <text x="424" y="80" fill="#E6EDF8" font-size="13" font-weight="700">Generate</text>
+          <text x="424" y="99" fill="#93A3BE" font-size="11">RAG + LLM</text>
+          <text x="424" y="114" fill="#93A3BE" font-size="11">k = 3 diffs</text>
+
+          <rect x="522" y="52" width="150" height="72" rx="10" fill="#12202F" stroke="#FFB454" stroke-width="2.5"/>
+          <text x="597" y="78" fill="#FFD9A8" font-size="13" font-weight="700">Validate</text>
+          <text x="597" y="97" fill="#C9B392" font-size="11">compile · PoC · tests</text>
+          <text x="597" y="112" fill="#C9B392" font-size="11">only PASS ships</text>
+
+          <rect x="700" y="52" width="180" height="72" rx="10" fill="#0E2A22" stroke="#3DDC97" stroke-width="2"/>
+          <text x="790" y="80" fill="#C9F5E2" font-size="13" font-weight="700">Ship</text>
+          <text x="790" y="99" fill="#8FBFAA" font-size="11">pull request + proof</text>
+          <text x="790" y="114" fill="#8FBFAA" font-size="11">diff · logs · tests</text>
+
+          <line x1="158" y1="88" x2="182" y2="88" stroke="#4C8DFF" stroke-width="2" marker-end="url(#a)"/>
+          <line x1="326" y1="88" x2="350" y2="88" stroke="#4C8DFF" stroke-width="2" marker-end="url(#a)"/>
+          <line x1="494" y1="88" x2="518" y2="88" stroke="#4C8DFF" stroke-width="2" marker-end="url(#a)"/>
+          <line x1="672" y1="88" x2="696" y2="88" stroke="#3DDC97" stroke-width="2" marker-end="url(#a)"/>
+
+          <path d="M597,124 L597,158 L256,158 L256,126" fill="none" stroke="#FF5D6C" stroke-width="1.6"
+                stroke-dasharray="5 4" marker-end="url(#a)" opacity=".85"/>
+          <text x="426" y="176" fill="#FF8D99" font-size="10.5" text-anchor="middle">failures consume budget; the CVE returns to the queue or escalates</text>
+        </g>
+      </svg>
+      <p>The feedback edge is the part the base framework does not have: what happened inside validation changes what is worth doing next.</p>
+    </section>
+
+    <!-- 4 -->
+    <section id="stages">
+      <h2>Section 4</h2>
+      <div class="h">Stage by stage</div>
+
+      <div class="card stageCard">
+        <div class="meta">Stage 1 · Ingest</div>
+        <h4>Turn a CVE identifier into a decision record</h4>
+        <p><strong>Input:</strong> CVE ID, plus the asset it was found on.<br>
+           <strong>Output:</strong> <code>vuln.json</code>.</p>
+        <pre><span class="c"># joined record used by every later stage</span>
+{
+  <span class="k">"cve"</span>: <span class="s">"CVE-2026-XXXXX"</span>,
+  <span class="k">"cvss"</span>: 9.2, <span class="k">"cwe"</span>: <span class="s">"CWE-787"</span>,
+  <span class="k">"epss_asof"</span>: { <span class="k">"date"</span>: <span class="s">"2026-10-20"</span>, <span class="k">"p"</span>: 0.41 },
+  <span class="k">"kev"</span>: false,
+  <span class="k">"asset"</span>: { <span class="k">"criticality"</span>: 0.8, <span class="k">"exposure"</span>: 0.9, <span class="k">"ids"</span>: true },
+  <span class="k">"fix_commit"</span>: <span class="s">"abc123"</span>, <span class="k">"poc"</span>: <span class="s">"poc-01"</span>
+}</pre>
+        <p><strong>Failure modes:</strong> missing CVSS (use the v3.1 base vector if v4 is absent); EPSS queried
+           at the wrong date (this silently leaks the future — see threats); duplicate CVEs across hosts
+           (deduplicate by CVE and merge asset context).</p>
+        <p><strong>Feeds:</strong> every downstream stage. If this record is wrong, everything after it is wrong.</p>
+      </div>
+
+      <div class="card stageCard s2">
+        <div class="meta">Stage 2 · Prioritise</div>
+        <h4>Decide what is worth attempting this week</h4>
+        <p><strong>Input:</strong> the queue of records, a budget, and a patchability estimate.<br>
+           <strong>Output:</strong> an ordered queue.</p>
+        <p>The objective is not "maximise severity covered". It is "maximise validated patches per unit of
+           review capacity". A critical bug that the pipeline cannot fix consumes the same budget as an
+           easy one and returns nothing.</p>
+        <p><strong>Failure mode:</strong> if patchability is over-weighted, the queue drifts toward trivial
+           bugs and critical coverage collapses. The weight is learned and ablated, never assumed.</p>
+      </div>
+
+      <div class="card stageCard s3">
+        <div class="meta">Stage 3 · Generate</div>
+        <h4>Produce candidate diffs for the localised function</h4>
+        <p><strong>Input:</strong> vulnerable function, its CWE, retrieved exemplars, build context.<br>
+           <strong>Output:</strong> k unified diffs.</p>
+        <pre><span class="c"># prompt skeleton</span>
+system: You repair C/C++ security vulnerabilities. Return only a unified diff.
+user:
+  CWE: {cwe_id} — {cwe_name}
+  <span class="k">Vulnerable function:</span>
+  {function_source}
+  <span class="k">Similar fixes for this weakness class:</span>
+  {retrieved_examples}
+  <span class="k">Constraints:</span> minimal change; no new dependencies; keep the API stable.</pre>
+        <p><strong>Why retrieval:</strong> exemplars of the same weakness class raise the probability of a
+           compilable, idiomatic fix far more cheaply than a larger model.</p>
+        <p><strong>Failure modes:</strong> the model edits the wrong region, changes the API, adds a
+           dependency, or "fixes" by removing functionality. All four are caught downstream — that is the
+           point of the gate.</p>
+      </div>
+
+      <div class="card stageCard s4">
+        <div class="meta">Stage 4 · Validate</div>
+        <h4>Prove the patch, or discard it</h4>
+        <p>This is the contribution. Details in the next section.</p>
+      </div>
+
+      <div class="card stageCard s5">
+        <div class="meta">Stage 5 · Ship</div>
+        <h4>Hand over evidence, not a suggestion</h4>
+        <p><strong>Output:</strong> a pull request containing the diff, PoC output before and after, the
+           sanitizer log, the regression report, and the exact model revision used.</p>
+        <p>Deployment is a reviewable PR. Automatic merge is deliberately out of scope: a wrong security
+           patch can be worse than the vulnerability.</p>
+      </div>
+    </section>
+
+    <!-- 5 -->
+    <section id="gate">
+      <h2>Section 5</h2>
+      <div class="h">The validation gate</div>
+      <p>Checks are ordered cheapest-first so that weak candidates die before expensive ones run.</p>
+      <table>
+        <tr><th>#</th><th>Check</th><th>Implementation</th><th>On failure</th></tr>
+        <tr><td>1</td><td>Applies</td><td><code>git apply --check</code> in a clean worktree</td><td>try next candidate</td></tr>
+        <tr><td>2</td><td>Compiles</td><td>project build system inside the benchmark container</td><td>try next candidate</td></tr>
+        <tr><td>3</td><td>Sanitizes</td><td>rebuild with <code>-fsanitize=address,undefined</code></td><td>try next candidate</td></tr>
+        <tr><td>4</td><td>PoC silent</td><td>replay the original reproducer 3×</td><td>try next candidate</td></tr>
+        <tr><td>5</td><td>Regression</td><td>project test suite (or benchmark harness)</td><td>try next candidate</td></tr>
+        <tr><td>6</td><td>Not a cheat</td><td>body deleted, input hardcoded, error swallowed, tests modified</td><td>try next candidate</td></tr>
+        <tr><td>7</td><td>Static</td><td><code>clang-tidy</code> + <code>semgrep</code> on changed lines</td><td>warn or reject</td></tr>
+      </table>
+
+      <div class="callout bad">
+        <b>The oracle problem.</b> A validation gate is only as good as its reproducer. Datasets without PoCs
+        and tests cannot support claims of correctness — which is exactly why this work uses reproducible
+        benchmarks (ARVO, Sec-bench) and treats "no PoC" as out of scope rather than as a success.
+      </div>
+
+      <div class="callout">
+        <b>PoC-only validation overestimates correctness.</b> A patch can silence the crash while breaking the
+        program or special-casing the input. The cheat checks and regression step exist to catch that, and the
+        <em>overfit rate</em> is reported rather than hidden.
+      </div>
+    </section>
+
+    <!-- 6 -->
+    <section id="score">
+      <h2>Section 6</h2>
+      <div class="h">Scoring and ranking</div>
+      <p>Every attempt spends scarce review capacity, so the correct ordering is by expected value per unit
+         of that capacity:</p>
+      <div class="formula">
+        EV(c) = <span class="w">P(exploit | c)</span> × <span class="w">impact(c)</span> ×
+        <span class="new">P(patch validates | c)</span> ÷ <span class="w">cost(c)</span>
+        <span class="note">P(exploit) comes from EPSS, overridden by KEV. impact combines CVSS with asset criticality.
+        The patchability term is the new one: nothing in CVSS, EPSS, KEV or SSVC models whether a fix can actually be produced.</span>
+      </div>
+      <p>The operational form is a weighted score; the weights are learned on validation episodes and ablated
+         term by term:</p>
+      <div class="formula">
+        priority = <span class="w">w₁</span>·CVSS + <span class="w">w₂</span>·EPSS + <span class="w">w₃</span>·KEV
+        + <span class="w">w₄</span>·asset + <span class="new">w₅·patchability</span> − λ·effort
+      </div>
+      <table>
+        <tr><th>Signal</th><th>Source</th><th>Question it answers</th></tr>
+        <tr><td>CVSS v3.1 / v4.0</td><td>FIRST</td><td>how bad if exploited</td></tr>
+        <tr><td>EPSS</td><td>FIRST</td><td>probability of exploitation in 30 days</td></tr>
+        <tr><td>KEV</td><td>CISA</td><td>is it already being exploited</td></tr>
+        <tr><td>CWE</td><td>MITRE</td><td>which repair strategy applies</td></tr>
+        <tr><td>SSVC</td><td>CISA / SEI</td><td>decision-tree baseline</td></tr>
+        <tr><td><strong>patchability</strong></td><td><strong>this work</strong></td><td><strong>can the pipeline fix it at all</strong></td></tr>
+      </table>
+      <div class="callout good">
+        <b>Worked example.</b> Two CVEs, one review-hour each. A: CVSS 9.8, EPSS 0.02, patchability 0.15 →
+        expected validated fixes ≈ 0.003. B: CVSS 8.1, EPSS 0.35, patchability 0.80 → ≈ 0.28. Ranking by
+        severity picks A; expected value picks B, roughly ninety times better per hour.
+      </div>
+    </section>
+
+    <!-- 7 -->
+    <section id="metrics">
+      <h2>Section 7</h2>
+      <div class="h">What gets measured</div>
+      <table>
+        <tr><th>Metric</th><th>Definition</th><th>Why this and not something simpler</th></tr>
+        <tr><td><strong>VPR</strong> — validated patch rate</td><td>passes compile <em>and</em> PoC silent <em>and</em> regression ÷ attempted</td><td>strict conjunction means "could this ship"; looser definitions inflate results</td></tr>
+        <tr><td><strong>VPB</strong> — validated patches per budget</td><td>validated ÷ review-hours</td><td>review capacity is the binding constraint; raw counts reward the wrong behaviour</td></tr>
+        <tr><td><strong>MTTP</strong></td><td>disclosure → validated patch, days</td><td>the motivation is the shrinking window, so time is the unit that matters</td></tr>
+        <tr><td><strong>Critical coverage @ T</strong></td><td>share of CVSS ≥ 9.0 validated within T days</td><td>operations care about the dangerous tail, not the mean</td></tr>
+        <tr><td><strong>Overfit rate</strong></td><td>passes PoC but rejected by cheat checks</td><td>exposes patches that game the oracle</td></tr>
+        <tr><td><strong>Cost</strong></td><td>GPU-minutes, USD, and review-minutes per valid patch</td><td>a method that costs more than it saves is not a solution</td></tr>
+      </table>
+      <p>Statistics: at least three seeds and thirty episodes per configuration, paired comparisons with the
+         Wilcoxon signed-rank test, medians with interquartile ranges, effect sizes reported.</p>
+    </section>
+
+    <!-- 8 -->
+    <section id="requirements">
+      <h2>Section 8</h2>
+      <div class="h">What the work requires</div>
+      <table>
+        <tr><th>Requirement</th><th>Minimum</th><th>Why</th></tr>
+        <tr><td>Reproducible benchmark</td><td>ARVO or Sec-bench, ~300 CVEs</td><td>validation needs real PoCs</td></tr>
+        <tr><td>Metadata feeds</td><td>NVD, EPSS (as-of), KEV</td><td>ranking inputs</td></tr>
+        <tr><td>GPU</td><td>1 × 24 GB (or rented)</td><td>7B code model at k=3 over 300 CVEs</td></tr>
+        <tr><td>CPU / disk</td><td>16 cores, ~300 GB</td><td>container builds</td></tr>
+        <tr><td>Toolchain</td><td>clang/gcc with ASan + UBSan</td><td>the gate</td></tr>
+        <tr><td>Model</td><td>Qwen2.5-Coder-7B or CodeLlama</td><td>open weights, pinned revision</td></tr>
+        <tr><td>Time</td><td>~10 weeks full-time</td><td>build, experiments, writing</td></tr>
+        <tr><td>Policy</td><td>human review before merge</td><td>safety, and it defines the budget</td></tr>
+      </table>
+    </section>
+
+    <!-- 9 -->
+    <section id="scope">
+      <h2>Section 9</h2>
+      <div class="h">Scope, stated before anyone asks</div>
+      <div class="grid2">
+        <div class="card tight" style="border-left:3px solid var(--green)">
+          <h4>In scope <span class="pill new">IN</span></h4>
+          <ul style="margin:0">
+            <li>Open-source C/C++, buildable in a container</li>
+            <li>Reproducible crash or PoC</li>
+            <li>Function-local repair (≤ ~50 lines, ≤ 2 files)</li>
+            <li>Memory safety: CWE-787, 125, 416, 476, 190</li>
+            <li>Injection: CWE-89, 78, 79, 22</li>
+          </ul>
+        </div>
+        <div class="card tight" style="border-left:3px solid var(--red)">
+          <h4>Out of scope <span class="pill out">OUT</span></h4>
+          <ul style="margin:0">
+            <li>Authentication and design flaws (CWE-287, 306)</li>
+            <li>Race conditions, crypto misuse, side channels</li>
+            <li>Kernel, firmware, closed source, binaries</li>
+            <li>Multi-file redesigns</li>
+            <li>Anything without a reproducible trigger</li>
+          </ul>
+        </div>
+      </div>
+      <p>Where a vendor fix exists, upgrading is the correct answer and this pipeline says so instead of
+         hand-patching. It targets the gap: no adequate fix in the deployed version, or a required backport.</p>
+    </section>
+
+    <!-- 10 -->
+    <section id="threats">
+      <h2>Section 10</h2>
+      <div class="h">Threats to validity</div>
+      <table>
+        <tr><th>Threat</th><th>Consequence</th><th>Mitigation</th></tr>
+        <tr><td>Benchmark selection bias</td><td>OSS-Fuzz projects are not enterprise software</td><td>report the funnel; state the population</td></tr>
+        <tr><td>PoC-only oracle</td><td>overestimates correctness</td><td>regression + cheat checks + overfit rate</td></tr>
+        <tr><td>Look-ahead in EPSS</td><td>inflates prioritisation quality</td><td>query as-of the decision date only</td></tr>
+        <tr><td>Label leakage in the predictor</td><td>optimistic AUC</td><td>split by project, not by CVE</td></tr>
+        <tr><td>Model drift</td><td>irreproducible results</td><td>pin weights, revision hash, temperature, k</td></tr>
+        <tr><td>Single-org cost model</td><td>weights do not transfer</td><td>sensitivity sweep over w₅ and budget</td></tr>
+      </table>
+    </section>
+
+    <!-- 11 -->
+    <section id="refs">
+      <h2>Section 11</h2>
+      <div class="h">References</div>
+      <p class="ref">Hore, S., Shah, A., &amp; Bastian, N. D. (2023). Deep VULMAN: A deep reinforcement learning-enabled cyber vulnerability management framework. <em>Expert Systems with Applications</em>, 221, 119734. <a href="https://doi.org/10.1016/j.eswa.2023.119734">doi:10.1016/j.eswa.2023.119734</a></p>
+      <p class="ref">Fu, M., Tantithamthavorn, C., Le, T., Kume, Y., Nguyen, V., Phung, D., &amp; Grundy, J. (2024). AIBugHunter: A practical tool for predicting, classifying and repairing software vulnerabilities. <em>Empirical Software Engineering</em>, 29(1), 4. <a href="https://doi.org/10.1007/s10664-023-10346-3">doi:10.1007/s10664-023-10346-3</a></p>
+      <p class="ref">Malkawi, M., &amp; Alhajj, R. (2026). AI-powered vulnerability detection and patch management in cybersecurity. <em>Machine Learning and Knowledge Extraction</em>, 8(1), 19. <a href="https://doi.org/10.3390/make8010019">doi:10.3390/make8010019</a></p>
+      <p class="ref">Islam, C., et al. (2023). Runtime software patching: Taxonomy, survey and future directions. <em>Journal of Systems and Software</em>, 200, 111652. <a href="https://doi.org/10.1016/j.jss.2023.111652">doi:10.1016/j.jss.2023.111652</a></p>
+      <p class="ref">Bhandari, G., Gavric, N., &amp; Shalaginov, A. (2025). Generating vulnerability security fixes with code language models. <em>Information and Software Technology</em>.</p>
+    </section>
+
+    <div class="card" style="margin-top:56px;border-left:3px solid var(--blue)">
+      <h4>One sentence</h4>
+      <p style="margin:0">Rank vulnerabilities by <strong>expected value of a validated patch per unit of review
+      capacity</strong> — severity × exploit likelihood × <em>can we actually fix it</em> — then prove every
+      patch before it ships.</p>
+    </div>
+  </main>
+</div>
+
+<footer>
+  <div>Automated Patching · technical detail · October 2026</div>
+  <div><a href="./index.html">← back to the 3D demo</a></div>
+</footer>
+
+</body>
+</html>
