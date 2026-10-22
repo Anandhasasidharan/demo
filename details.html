@@ -53,8 +53,8 @@
   .lede{font-size:17px;color:#B9C8DE;margin:0;max-width:720px}
 
   section{margin-top:54px;scroll-margin-top:86px}
-  h2{font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:#6E9CE0;margin:0 0 6px;font-weight:700}
-  h2 + .h{font-size:26px;font-weight:700;letter-spacing:-.02em;margin:0 0 16px;color:#fff}
+  .eyebrow{font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:#6E9CE0;margin:0 0 6px;font-weight:700}
+  h2.h{font-size:26px;font-weight:700;letter-spacing:-.02em;margin:0 0 16px;color:#fff;line-height:1.25}
   h3{font-size:16.5px;margin:26px 0 8px;color:#EAF1FB}
   p{color:#BECCE1;margin:0 0 12px}
   ul,ol{color:#BECCE1;padding-left:20px;margin:0 0 14px}
@@ -123,7 +123,7 @@
     .layout{display:block;max-width:none;padding:0}
     .card,table,pre,.formula{border-color:#ccc;background:#fff;color:#111}
     td,th{color:#111;background:#fff!important}
-    h1,h2+.h,h3,.card h4,strong{color:#111}
+    h1,h2.h,.eyebrow,h3,.card h4,strong{color:#111}
     p,li,.lede{color:#222}
     section{page-break-inside:avoid}
   }
@@ -166,8 +166,8 @@
 
     <!-- 1 -->
     <section id="problem">
-      <h2>Section 1</h2>
-      <div class="h">The problem is no longer finding vulnerabilities</div>
+      <p class="eyebrow">Section 1</p>
+      <h2 class="h">The problem is no longer finding vulnerabilities</h2>
       <p>Organisations do not lack vulnerability data. A scanner produces hundreds of findings per week. What they lack is the capacity to turn findings into <em>shipped, verified fixes</em>. Vendors keep compressing the window in which a fix is expected:</p>
       <ul>
         <li><strong>Ubuntu Livepatch</strong> applies critical kernel fixes without a reboot; Arm64 support arrives with 26.04 LTS.</li>
@@ -179,8 +179,8 @@
 
     <!-- 2 -->
     <section id="gap">
-      <h2>Section 2</h2>
-      <div class="h">Two literatures that never meet</div>
+      <p class="eyebrow">Section 2</p>
+      <h2 class="h">Two literatures that never meet</h2>
       <div class="grid2">
         <div class="card tight">
           <div class="meta">Prioritisation</div>
@@ -207,8 +207,8 @@
 
     <!-- 3 -->
     <section id="pipeline">
-      <h2>Section 3</h2>
-      <div class="h">The pipeline</div>
+      <p class="eyebrow">Section 3</p>
+      <h2 class="h">The pipeline</h2>
       <svg viewBox="0 0 900 190" width="100%" role="img" aria-label="Pipeline diagram: ingest, prioritise, generate, validate, ship">
         <defs>
           <marker id="a" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
@@ -257,8 +257,8 @@
 
     <!-- 4 -->
     <section id="stages">
-      <h2>Section 4</h2>
-      <div class="h">Stage by stage</div>
+      <p class="eyebrow">Section 4</p>
+      <h2 class="h">Stage by stage</h2>
 
       <div class="card stageCard">
         <div class="meta">Stage 1 · Ingest</div>
@@ -331,8 +331,8 @@ user:
 
     <!-- 5 -->
     <section id="gate">
-      <h2>Section 5</h2>
-      <div class="h">The validation gate</div>
+      <p class="eyebrow">Section 5</p>
+      <h2 class="h">The validation gate</h2>
       <p>Checks are ordered cheapest-first so that weak candidates die before expensive ones run.</p>
       <table>
         <tr><th>#</th><th>Check</th><th>Implementation</th><th>On failure</th></tr>
@@ -360,8 +360,8 @@ user:
 
     <!-- 6 -->
     <section id="score">
-      <h2>Section 6</h2>
-      <div class="h">Scoring and ranking</div>
+      <p class="eyebrow">Section 6</p>
+      <h2 class="h">Scoring and ranking</h2>
       <p>Every attempt spends scarce review capacity, so the correct ordering is by expected value per unit
          of that capacity:</p>
       <div class="formula">
@@ -394,8 +394,8 @@ user:
 
     <!-- 7 -->
     <section id="metrics">
-      <h2>Section 7</h2>
-      <div class="h">What gets measured</div>
+      <p class="eyebrow">Section 7</p>
+      <h2 class="h">What gets measured</h2>
       <table>
         <tr><th>Metric</th><th>Definition</th><th>Why this and not something simpler</th></tr>
         <tr><td><strong>VPR</strong> — validated patch rate</td><td>passes compile <em>and</em> PoC silent <em>and</em> regression ÷ attempted</td><td>strict conjunction means "could this ship"; looser definitions inflate results</td></tr>
@@ -411,8 +411,8 @@ user:
 
     <!-- 8 -->
     <section id="requirements">
-      <h2>Section 8</h2>
-      <div class="h">What the work requires</div>
+      <p class="eyebrow">Section 8</p>
+      <h2 class="h">What the work requires</h2>
       <table>
         <tr><th>Requirement</th><th>Minimum</th><th>Why</th></tr>
         <tr><td>Reproducible benchmark</td><td>ARVO or Sec-bench, ~300 CVEs</td><td>validation needs real PoCs</td></tr>
@@ -428,8 +428,8 @@ user:
 
     <!-- 9 -->
     <section id="scope">
-      <h2>Section 9</h2>
-      <div class="h">Scope, stated before anyone asks</div>
+      <p class="eyebrow">Section 9</p>
+      <h2 class="h">Scope, stated before anyone asks</h2>
       <div class="grid2">
         <div class="card tight" style="border-left:3px solid var(--green)">
           <h4>In scope <span class="pill new">IN</span></h4>
@@ -458,8 +458,8 @@ user:
 
     <!-- 10 -->
     <section id="threats">
-      <h2>Section 10</h2>
-      <div class="h">Threats to validity</div>
+      <p class="eyebrow">Section 10</p>
+      <h2 class="h">Threats to validity</h2>
       <table>
         <tr><th>Threat</th><th>Consequence</th><th>Mitigation</th></tr>
         <tr><td>Benchmark selection bias</td><td>OSS-Fuzz projects are not enterprise software</td><td>report the funnel; state the population</td></tr>
@@ -473,8 +473,8 @@ user:
 
     <!-- 11 -->
     <section id="refs">
-      <h2>Section 11</h2>
-      <div class="h">References</div>
+      <p class="eyebrow">Section 11</p>
+      <h2 class="h">References</h2>
       <p class="ref">Hore, S., Shah, A., &amp; Bastian, N. D. (2023). Deep VULMAN: A deep reinforcement learning-enabled cyber vulnerability management framework. <em>Expert Systems with Applications</em>, 221, 119734. <a href="https://doi.org/10.1016/j.eswa.2023.119734">doi:10.1016/j.eswa.2023.119734</a></p>
       <p class="ref">Fu, M., Tantithamthavorn, C., Le, T., Kume, Y., Nguyen, V., Phung, D., &amp; Grundy, J. (2024). AIBugHunter: A practical tool for predicting, classifying and repairing software vulnerabilities. <em>Empirical Software Engineering</em>, 29(1), 4. <a href="https://doi.org/10.1007/s10664-023-10346-3">doi:10.1007/s10664-023-10346-3</a></p>
       <p class="ref">Malkawi, M., &amp; Alhajj, R. (2026). AI-powered vulnerability detection and patch management in cybersecurity. <em>Machine Learning and Knowledge Extraction</em>, 8(1), 19. <a href="https://doi.org/10.3390/make8010019">doi:10.3390/make8010019</a></p>
