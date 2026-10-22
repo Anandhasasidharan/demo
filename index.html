@@ -1,0 +1,768 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Automated Patching — from CVE to validated fix</title>
+<meta name="description" content="An interactive 3D walkthrough of an automated vulnerability patching pipeline: ingest, prioritise, generate, validate, ship." />
+<style>
+  :root{
+    --bg:#04070E;
+    --ink:#E8F0FB;
+    --muted:#8FA0BC;
+    --blue:#4C8DFF;
+    --violet:#A78BFA;
+    --cyan:#38BDF8;
+    --amber:#FFB454;
+    --green:#3DDC97;
+    --red:#FF5D6C;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--ink);
+    font-family:"Segoe UI",system-ui,-apple-system,Inter,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  #scene{position:fixed;inset:0;z-index:0;display:block}
+  .vignette{position:fixed;inset:0;z-index:1;pointer-events:none;
+    background:radial-gradient(ellipse at 50% 45%, transparent 35%, rgba(2,4,10,.55) 78%, rgba(2,4,10,.92) 100%)}
+  .grain{position:fixed;inset:0;z-index:2;pointer-events:none;opacity:.035;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)'/%3E%3C/svg%3E")}
+
+  .ui{position:fixed;inset:0;z-index:3;pointer-events:none}
+  .ui > *{pointer-events:auto}
+
+  /* ---------- header ---------- */
+  header{position:absolute;top:26px;left:30px;max-width:520px}
+  .badge{display:inline-flex;align-items:center;gap:8px;font-size:11px;letter-spacing:.18em;
+    text-transform:uppercase;color:#9FB4D8;border:1px solid rgba(80,120,180,.35);
+    background:rgba(10,18,34,.55);backdrop-filter:blur(8px);padding:6px 11px;border-radius:999px}
+  .badge i{width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 10px var(--green);
+    animation:pulse 2.4s infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+  h1{margin:14px 0 6px;font-size:clamp(26px,3.4vw,44px);line-height:1.05;letter-spacing:-.02em;font-weight:700}
+  h1 em{font-style:normal;background:linear-gradient(90deg,var(--cyan),var(--green));
+    -webkit-background-clip:text;background-clip:text;color:transparent}
+  .sub{margin:0;color:var(--muted);font-size:14.5px;line-height:1.55;max-width:440px}
+
+  /* ---------- stage rail ---------- */
+  .rail{position:absolute;top:30px;right:30px;display:flex;flex-direction:column;gap:6px;
+    background:rgba(8,14,26,.55);backdrop-filter:blur(10px);border:1px solid rgba(70,100,150,.25);
+    border-radius:14px;padding:12px}
+  .rail .item{display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:9px;
+    font-size:12.5px;color:var(--muted);cursor:pointer;transition:.18s;border:1px solid transparent;
+    background:none;text-align:left;font-family:inherit;width:100%}
+  .rail .item:hover{background:rgba(70,110,170,.12);color:var(--ink)}
+  .rail .item.active{background:rgba(70,110,170,.18);color:#fff;border-color:rgba(120,160,220,.35)}
+  .rail .dot{width:8px;height:8px;border-radius:50%;flex:none;box-shadow:0 0 10px currentColor}
+  .rail .n{font-variant-numeric:tabular-nums;opacity:.55;font-size:11px;width:14px}
+
+  /* ---------- caption ---------- */
+  .caption{position:absolute;left:30px;bottom:30px;width:min(430px,calc(100vw - 60px));
+    background:rgba(8,14,26,.72);backdrop-filter:blur(12px);border:1px solid rgba(70,100,150,.28);
+    border-radius:16px;padding:18px 20px;transition:.25s}
+  .caption .k{display:flex;align-items:center;gap:9px;font-size:11px;letter-spacing:.16em;
+    text-transform:uppercase;color:var(--muted);margin-bottom:8px}
+  .caption .k b{color:var(--ink);font-weight:600;letter-spacing:.02em;text-transform:none;font-size:12px}
+  .caption h2{margin:0 0 8px;font-size:19px;letter-spacing:-.01em}
+  .caption p{margin:0;color:#B9C8DE;font-size:13.5px;line-height:1.6}
+  .caption .why{margin-top:10px;padding-top:10px;border-top:1px solid rgba(70,100,150,.22);
+    color:#8FA0BC;font-size:12.5px}
+  .caption .why b{color:#D6E2F4}
+
+  /* ---------- stats ---------- */
+  .stats{position:absolute;right:30px;bottom:30px;display:flex;gap:10px}
+  .stat{background:rgba(8,14,26,.72);backdrop-filter:blur(12px);border:1px solid rgba(70,100,150,.28);
+    border-radius:13px;padding:12px 16px;min-width:92px;text-align:center}
+  .stat .v{font-size:24px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+  .stat .l{font-size:10px;letter-spacing:.13em;text-transform:uppercase;color:var(--muted);margin-top:3px}
+  .stat.ok .v{color:var(--green)}
+  .stat.bad .v{color:var(--red)}
+
+  /* ---------- controls ---------- */
+  .controls{position:absolute;bottom:30px;left:50%;transform:translateX(-50%);display:flex;gap:8px}
+  .btn{background:rgba(12,21,38,.8);backdrop-filter:blur(10px);border:1px solid rgba(80,120,180,.3);
+    color:#CFDCEE;border-radius:11px;padding:10px 16px;font-size:12.5px;cursor:pointer;
+    font-family:inherit;transition:.18s;white-space:nowrap}
+  .btn:hover{background:rgba(30,55,95,.85);border-color:rgba(120,160,220,.5);color:#fff}
+  .btn.primary{background:linear-gradient(180deg,rgba(56,189,248,.22),rgba(56,189,248,.08));
+    border-color:rgba(56,189,248,.45);color:#BFE9FF}
+
+  /* ---------- modal ---------- */
+  .modal{position:fixed;inset:0;z-index:10;display:none;align-items:center;justify-content:center;
+    background:rgba(2,5,12,.72);backdrop-filter:blur(6px);padding:24px}
+  .modal.open{display:flex}
+  .sheet{max-width:760px;width:100%;max-height:84vh;overflow:auto;background:linear-gradient(180deg,#0B1526,#070D18);
+    border:1px solid rgba(90,130,190,.35);border-radius:20px;padding:30px 32px;position:relative;
+    box-shadow:0 40px 120px rgba(0,0,0,.6)}
+  .sheet h2{margin:0 0 6px;font-size:24px;letter-spacing:-.02em}
+  .sheet .lead{color:var(--muted);font-size:14px;margin:0 0 20px}
+  .sheet h3{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#7FA6E0;margin:22px 0 8px}
+  .sheet p,.sheet li{color:#C3D2E6;font-size:14px;line-height:1.65}
+  .sheet ul{padding-left:18px;margin:6px 0}
+  .sheet code{background:rgba(90,130,190,.15);border:1px solid rgba(90,130,190,.25);
+    padding:1px 6px;border-radius:5px;font-size:12.5px;color:#A8C8FF}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .card{background:rgba(16,28,48,.6);border:1px solid rgba(80,120,180,.25);border-radius:12px;padding:14px 16px}
+  .card b{display:block;font-size:13px;margin-bottom:4px}
+  .card span{font-size:12.5px;color:var(--muted);line-height:1.5}
+  .close{position:absolute;top:16px;right:16px;background:none;border:1px solid rgba(90,130,190,.3);
+    color:var(--muted);width:34px;height:34px;border-radius:9px;cursor:pointer;font-size:16px}
+  .close:hover{color:#fff;border-color:rgba(120,160,220,.6)}
+
+  .hint{position:absolute;bottom:96px;left:50%;transform:translateX(-50%);font-size:11.5px;
+    color:#5E6E88;letter-spacing:.06em;white-space:nowrap;opacity:0;animation:fadeIn 1s 1.6s forwards}
+  @keyframes fadeIn{to{opacity:1}}
+
+  .loading{position:fixed;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;
+    background:var(--bg);color:var(--muted);font-size:13px;letter-spacing:.12em;text-transform:uppercase;
+    transition:opacity .6s}
+  .loading.hide{opacity:0;pointer-events:none}
+
+  @media (max-width:860px){
+    header{left:18px;top:18px;right:18px;max-width:none}
+    .sub{display:none}
+    .rail{top:auto;bottom:200px;right:14px;flex-direction:row;flex-wrap:wrap;padding:8px;gap:4px}
+    .rail .item{padding:6px 8px;font-size:11px}
+    .rail .item .lbl{display:none}
+    .caption{left:14px;right:14px;bottom:104px;width:auto;padding:14px 16px}
+    .caption h2{font-size:16px}
+    .caption .why{display:none}
+    .stats{right:14px;bottom:14px}
+    .stat{padding:9px 11px;min-width:74px}
+    .stat .v{font-size:19px}
+    .controls{left:14px;bottom:14px;transform:none}
+    .btn{padding:9px 12px;font-size:11.5px}
+    .hint{display:none}
+  }
+</style>
+</head>
+<body>
+<canvas id="scene"></canvas>
+<div class="vignette"></div>
+<div class="grain"></div>
+
+<div class="loading" id="loading">Loading scene…</div>
+
+<div class="ui">
+  <header>
+    <div class="badge"><i></i> Research demo · automated patching</div>
+    <h1>From CVE to <em>proven fix</em></h1>
+    <p class="sub">Watch one vulnerability travel through a pipeline that finds it, ranks it, writes a patch, proves the patch works, and ships it.</p>
+  </header>
+
+  <nav class="rail" id="rail" aria-label="Pipeline stages"></nav>
+
+  <section class="caption" id="caption">
+    <div class="k"><b id="capKicker">1 · INGEST</b> <span id="capTag">stage 1 of 5</span></div>
+    <h2 id="capTitle">A scanner reports a CVE</h2>
+    <p id="capBody">Every week a scanner finds hundreds of vulnerabilities. Each one has an identifier, a severity score and a machine it lives on.</p>
+    <div class="why" id="capWhy"><b>Why it matters:</b> this is the raw input — nothing has been fixed yet.</div>
+  </section>
+
+  <div class="stats">
+    <div class="stat"><div class="v" id="sSeen">0</div><div class="l">CVEs seen</div></div>
+    <div class="stat ok"><div class="v" id="sOk">0</div><div class="l">validated</div></div>
+    <div class="stat bad"><div class="v" id="sBad">0</div><div class="l">failed</div></div>
+  </div>
+
+  <div class="controls">
+    <button class="btn" id="btnPause">Pause</button>
+    <button class="btn" id="btnReset">Reset</button>
+    <button class="btn primary" id="btnAbout">What this shows</button>
+  </div>
+
+  <div class="hint">drag to orbit · scroll to zoom · click a ring</div>
+</div>
+
+<div class="modal" id="modal">
+  <div class="sheet">
+    <button class="close" id="btnClose" aria-label="Close">✕</button>
+    <h2>What this shows</h2>
+    <p class="lead">An automated patching pipeline for CVE-classified vulnerabilities — and why the ordering decision matters.</p>
+
+    <h3>The problem</h3>
+    <p>Vendors keep shortening the patch window. Yet most organisations still rank vulnerabilities and hand the list to a human. Prioritisation research stops at the list; repair research fixes whatever it is given. Nothing measures how many <em>validated</em> patches can be shipped end-to-end.</p>
+
+    <h3>The five stages you are watching</h3>
+    <div class="grid2">
+      <div class="card"><b>1 · Ingest</b><span>NVD data: CVE, CVSS, CWE, affected versions, exploit likelihood.</span></div>
+      <div class="card"><b>2 · Prioritise</b><span>Order by expected value: severity × exploit likelihood × patchability, per unit of review budget.</span></div>
+      <div class="card"><b>3 · Generate</b><span>An LLM proposes candidate patches for the selected function.</span></div>
+      <div class="card"><b>4 · Validate</b><span>Compile, replay the exploit, run regression tests. Only a pass is accepted.</span></div>
+    </div>
+    <div class="card" style="margin-top:14px"><b>5 · Ship</b><span>A pull request with proof attached: diff, before/after exploit, test log.</span></div>
+
+    <h3>Why ordering matters</h3>
+    <p>Automated generation is cheap; <strong>validation is not</strong>. A hard memory-corruption bug can consume the same review budget as an easy injection flaw and still fail. Ordering by severity alone therefore wastes budget on vulnerabilities the pipeline cannot fix — which is what the red failures in the scene represent.</p>
+
+    <h3>What is measured</h3>
+    <ul>
+      <li><strong>Validated Patch Rate</strong> — passes compile, exploit replay and tests.</li>
+      <li><strong>Validated patches per review-hour</strong> — the headline number.</li>
+      <li><strong>Critical coverage</strong> — share of CVSS ≥ 9.0 fixed within a window.</li>
+    </ul>
+
+    <h3>Scope, stated honestly</h3>
+    <p>In scope: open-source C/C++ with a reproducible proof-of-concept and a function-local repair. Out of scope: authentication and design flaws, race conditions, kernel and closed-source targets, and anything without a reproducible trigger.</p>
+    <p>Where a vendor already shipped a fix, upgrading is the correct action — this pipeline targets the cases where no adequate fix exists in the deployed version.</p>
+  </div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+/* ------------------------------------------------------------------ *
+ *  configuration
+ * ------------------------------------------------------------------ */
+const STAGES = [
+  { key:'ingest',   n:'1 · INGEST',   title:'A scanner reports a CVE',
+    body:'Every week a scanner reports hundreds of vulnerabilities. Each carries an identifier, a severity score and the machine it lives on.',
+    why:'This is the raw input. Nothing has been fixed yet.',
+    color:0x4C8DFF, tag:'stage 1 of 5' },
+  { key:'prioritise', n:'2 · PRIORITISE', title:'The queue is ordered by expected value',
+    body:'Severity alone is a poor guide. The order weighs how bad it is, how likely it is to be exploited, and — crucially — whether the pipeline can actually produce a fix.',
+    why:'A hard bug that will fail validation wastes the same budget as an easy one.',
+    color:0xA78BFA, tag:'stage 2 of 5' },
+  { key:'generate', n:'3 · GENERATE', title:'A patch is written',
+    body:'For the selected function, a language model proposes candidate patches, guided by the weakness class and similar fixes from the past.',
+    why:'Generation is cheap. The expensive part is proving it.',
+    color:0x38BDF8, tag:'stage 3 of 5' },
+  { key:'validate', n:'4 · VALIDATE', title:'The patch must survive the gate',
+    body:'It is applied and compiled, rebuilt with memory sanitizers, and the original exploit is replayed. Then the project’s tests must still pass.',
+    why:'This is where trust is created — and where most candidates die.',
+    color:0xFFB454, tag:'stage 4 of 5' },
+  { key:'ship', n:'5 · SHIP', title:'A proven fix leaves the pipeline',
+    body:'What emerges is not a suggestion. It is a patch with evidence attached: the diff, the exploit before and after, and the test log.',
+    why:'A fix nobody can verify is not a fix.',
+    color:0x3DDC97, tag:'stage 5 of 5' }
+];
+
+const NODE_POS = [
+  new THREE.Vector3(-8.6, 0.15, 0.0),
+  new THREE.Vector3(-4.3, 0.85, 1.35),
+  new THREE.Vector3( 0.0, 0.35, 0.0),
+  new THREE.Vector3( 4.3, 0.85,-1.35),
+  new THREE.Vector3( 8.6, 0.15, 0.0)
+];
+
+/* ------------------------------------------------------------------ *
+ *  renderer, scene, camera
+ * ------------------------------------------------------------------ */
+const canvas = document.getElementById('scene');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias:true, alpha:false, powerPreference:'high-performance' });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.15;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x04070E);
+scene.fog = new THREE.FogExp2(0x04070E, 0.026);
+
+const camera = new THREE.PerspectiveCamera(48, innerWidth/innerHeight, 0.1, 200);
+camera.position.set(0.5, 4.6, 14.2);
+
+const controls = new OrbitControls(camera, canvas);
+controls.target.set(0, 0.4, 0);
+controls.enableDamping = true;
+controls.dampingFactor = 0.06;
+controls.enablePan = false;
+controls.minDistance = 7;
+controls.maxDistance = 26;
+controls.minPolarAngle = 0.35;
+controls.maxPolarAngle = 1.42;
+controls.autoRotate = true;
+controls.autoRotateSpeed = 0.45;
+
+/* ------------------------------------------------------------------ *
+ *  lights
+ * ------------------------------------------------------------------ */
+scene.add(new THREE.AmbientLight(0x1B2C4A, 1.1));
+const key = new THREE.DirectionalLight(0xBFD8FF, 1.15);
+key.position.set(-6, 10, 8);
+scene.add(key);
+const rim = new THREE.DirectionalLight(0x2E5FA8, 0.8);
+rim.position.set(8, 4, -8);
+scene.add(rim);
+
+/* ------------------------------------------------------------------ *
+ *  starfield + floor
+ * ------------------------------------------------------------------ */
+(() => {
+  const n = 900, pos = new Float32Array(n*3), col = new Float32Array(n*3);
+  const c = new THREE.Color();
+  for (let i=0;i<n;i++){
+    const r = 22 + Math.random()*40;
+    const th = Math.random()*Math.PI*2;
+    const ph = Math.acos(2*Math.random()-1);
+    pos[i*3]   = r*Math.sin(ph)*Math.cos(th);
+    pos[i*3+1] = Math.abs(r*Math.cos(ph))*0.55 - 2;
+    pos[i*3+2] = r*Math.sin(ph)*Math.sin(th);
+    c.setHSL(0.58 + Math.random()*0.08, 0.6, 0.45 + Math.random()*0.35);
+    col[i*3]=c.r; col[i*3+1]=c.g; col[i*3+2]=c.b;
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos,3));
+  g.setAttribute('color', new THREE.BufferAttribute(col,3));
+  const m = new THREE.PointsMaterial({ size:0.13, vertexColors:true, transparent:true,
+    opacity:0.75, blending:THREE.AdditiveBlending, depthWrite:false, sizeAttenuation:true });
+  const pts = new THREE.Points(g, m);
+  scene.add(pts);
+  scene.userData.stars = pts;
+})();
+
+(() => {
+  const grid = new THREE.GridHelper(70, 70, 0x1B3558, 0x0C1730);
+  grid.position.y = -1.55;
+  grid.material.transparent = true;
+  grid.material.opacity = 0.55;
+  scene.add(grid);
+
+  const plane = new THREE.Mesh(
+    new THREE.PlaneGeometry(90, 90),
+    new THREE.MeshStandardMaterial({ color:0x050A14, roughness:0.95, metalness:0.15 })
+  );
+  plane.rotation.x = -Math.PI/2;
+  plane.position.y = -1.62;
+  scene.add(plane);
+})();
+
+/* ------------------------------------------------------------------ *
+ *  the path
+ * ------------------------------------------------------------------ */
+const curve = new THREE.CatmullRomCurve3(NODE_POS, false, 'catmullrom', 0.4);
+const tubeGeo = new THREE.TubeGeometry(curve, 220, 0.022, 8, false);
+const tube = new THREE.Mesh(tubeGeo, new THREE.MeshBasicMaterial({
+  color:0x2D5C99, transparent:true, opacity:0.55
+}));
+scene.add(tube);
+
+// faint outer glow tube
+const tubeGlow = new THREE.Mesh(
+  new THREE.TubeGeometry(curve, 160, 0.075, 8, false),
+  new THREE.MeshBasicMaterial({ color:0x1B4C8C, transparent:true, opacity:0.12,
+    blending:THREE.AdditiveBlending, depthWrite:false })
+);
+scene.add(tubeGlow);
+
+/* ------------------------------------------------------------------ *
+ *  sprite helpers
+ * ------------------------------------------------------------------ */
+function glowTexture(){
+  const s = 128, c = document.createElement('canvas');
+  c.width = c.height = s;
+  const g = c.getContext('2d');
+  const grd = g.createRadialGradient(s/2, s/2, 0, s/2, s/2, s/2);
+  grd.addColorStop(0, 'rgba(255,255,255,1)');
+  grd.addColorStop(0.25, 'rgba(255,255,255,.55)');
+  grd.addColorStop(0.6, 'rgba(255,255,255,.12)');
+  grd.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = grd;
+  g.fillRect(0,0,s,s);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+const GLOW = glowTexture();
+
+function labelSprite(text, hex, scale=1){
+  const c = document.createElement('canvas');
+  const w = 512, h = 128;
+  c.width = w; c.height = h;
+  const g = c.getContext('2d');
+  g.clearRect(0,0,w,h);
+  g.font = '600 44px "Segoe UI", Inter, Arial';
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.fillStyle = hex;
+  g.shadowColor = hex;
+  g.shadowBlur = 18;
+  g.fillText(text, w/2, h/2);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const spr = new THREE.Sprite(new THREE.SpriteMaterial({
+    map:tex, transparent:true, depthWrite:false, opacity:0.95
+  }));
+  spr.scale.set(4.4*scale, 1.1*scale, 1);
+  return spr;
+}
+
+/* ------------------------------------------------------------------ *
+ *  stations
+ * ------------------------------------------------------------------ */
+const stationGroup = new THREE.Group();
+scene.add(stationGroup);
+
+const stations = STAGES.map((st, i) => {
+  const grp = new THREE.Group();
+  grp.position.copy(NODE_POS[i]);
+
+  const color = new THREE.Color(st.color);
+
+  // ring
+  const ring = new THREE.Mesh(
+    new THREE.TorusGeometry(0.78, 0.032, 14, 72),
+    new THREE.MeshBasicMaterial({ color, transparent:true, opacity:0.95 })
+  );
+  grp.add(ring);
+
+  const halo = new THREE.Mesh(
+    new THREE.TorusGeometry(0.98, 0.008, 8, 72),
+    new THREE.MeshBasicMaterial({ color, transparent:true, opacity:0.35,
+      blending:THREE.AdditiveBlending, depthWrite:false })
+  );
+  grp.add(halo);
+
+  // soft core
+  const core = new THREE.Sprite(new THREE.SpriteMaterial({
+    map:GLOW, color, transparent:true, opacity:0.34,
+    blending:THREE.AdditiveBlending, depthWrite:false
+  }));
+  core.scale.set(2.6, 2.6, 1);
+  grp.add(core);
+
+  // beam
+  const beam = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.012, 0.012, 2.6, 6, 1, true),
+    new THREE.MeshBasicMaterial({ color, transparent:true, opacity:0.16,
+      blending:THREE.AdditiveBlending, depthWrite:false, side:THREE.DoubleSide })
+  );
+  beam.position.y = 1.35;
+  grp.add(beam);
+
+  // label
+  const lab = labelSprite(st.n.replace(/^\d+ · /,''), '#' + color.getHexString(), 0.85);
+  lab.position.set(0, -1.12, 0);
+  grp.add(lab);
+
+  // clickable picker
+  const pick = new THREE.Mesh(
+    new THREE.SphereGeometry(0.95, 12, 12),
+    new THREE.MeshBasicMaterial({ visible:false })
+  );
+  pick.userData.stage = i;
+  grp.add(pick);
+
+  const light = new THREE.PointLight(st.color, 6, 7, 2);
+  light.position.y = 0.3;
+  grp.add(light);
+
+  stationGroup.add(grp);
+  return { grp, ring, halo, core, beam, pick, light, color };
+});
+
+/* ------------------------------------------------------------------ *
+ *  tokens
+ * ------------------------------------------------------------------ */
+const tokens = [];
+const tokenGeo = new THREE.IcosahedronGeometry(0.17, 0);
+const SEVERITY = [
+  { min:9.0, color:0xFF5D6C },
+  { min:7.0, color:0xFFB454 },
+  { min:4.0, color:0xFFD166 },
+  { min:0.0, color:0x6B7A99 }
+];
+
+function makeToken(){
+  const sev = 9.6*(1 - Math.pow(Math.random(), 1.5)) + 0.4; // skewed to high
+  const band = SEVERITY.find(s => sev >= s.min);
+  const mat = new THREE.MeshStandardMaterial({
+    color: band.color, emissive: band.color, emissiveIntensity: 1.5,
+    roughness: 0.3, metalness: 0.2
+  });
+  const mesh = new THREE.Mesh(tokenGeo, mat);
+
+  const halo = new THREE.Sprite(new THREE.SpriteMaterial({
+    map:GLOW, color:band.color, transparent:true, opacity:0.5,
+    blending:THREE.AdditiveBlending, depthWrite:false
+  }));
+  halo.scale.set(0.95, 0.95, 1);
+  mesh.add(halo);
+
+  const patchability = 0.18 + Math.random()*0.7;
+  const t = {
+    mesh, halo,
+    t: 0,
+    speed: 0.036 + Math.random()*0.02,
+    sev, patchability,
+    state: 'moving',     // moving | dying | shipped
+    decided: false,
+    spin: (Math.random()*2-1)*1.4,
+    vy: 0,
+    life: 0
+  };
+  mesh.position.copy(curve.getPointAt(0));
+  scene.add(mesh);
+  tokens.push(t);
+  return t;
+}
+
+const MAX_TOKENS = 46;
+let spawnAcc = 0;
+
+/* ------------------------------------------------------------------ *
+ *  state
+ * ------------------------------------------------------------------ */
+const state = {
+  paused: false,
+  seen: 0,
+  ok: 0,
+  bad: 0,
+  stage: 0,
+  story: true,
+  storyT: 0,
+  hoverStation: -1
+};
+let statsDirty = true;
+
+/* ------------------------------------------------------------------ *
+ *  HUD
+ * ------------------------------------------------------------------ */
+const rail = document.getElementById('rail');
+STAGES.forEach((st, i) => {
+  const b = document.createElement('button');
+  b.className = 'item' + (i === 0 ? ' active' : '');
+  b.dataset.i = i;
+  b.innerHTML = `<span class="n">${i+1}</span>
+    <span class="dot" style="background:#${new THREE.Color(st.color).getHexString()};color:#${new THREE.Color(st.color).getHexString()}"></span>
+    <span class="lbl">${st.n.replace(/^\d+ · /,'')}</span>`;
+  b.addEventListener('click', () => selectStage(i, true));
+  rail.appendChild(b);
+});
+
+function selectStage(i, user){
+  state.stage = i;
+  state.story = false;
+  state.storyT = 0;
+  const st = STAGES[i];
+  document.getElementById('capKicker').textContent = st.n;
+  document.getElementById('capTag').textContent = st.tag;
+  document.getElementById('capTitle').textContent = st.title;
+  document.getElementById('capBody').textContent = st.body;
+  document.getElementById('capWhy').innerHTML = '<b>Why it matters:</b> ' + st.why;
+  [...rail.children].forEach((el, j) => el.classList.toggle('active', j === i));
+  // brief camera nudge toward the stage
+  controls.autoRotate = false;
+  const target = NODE_POS[i].clone().multiplyScalar(0.72);
+  controls.target.lerp(target, 0.35);
+  if (user) setTimeout(() => { controls.autoRotate = true; }, 5200);
+}
+
+function updateStats(){
+  document.getElementById('sSeen').textContent = state.seen;
+  document.getElementById('sOk').textContent = state.ok;
+  document.getElementById('sBad').textContent = state.bad;
+}
+
+/* ------------------------------------------------------------------ *
+ *  interaction
+ * ------------------------------------------------------------------ */
+const raycaster = new THREE.Raycaster();
+const pointer = new THREE.Vector2();
+
+function onPointer(ev){
+  const x = (ev.clientX / innerWidth) * 2 - 1;
+  const y = -(ev.clientY / innerHeight) * 2 + 1;
+  pointer.set(x, y);
+  raycaster.setFromCamera(pointer, camera);
+  const hits = raycaster.intersectObjects(stations.map(s => s.pick), false);
+  canvas.style.cursor = hits.length ? 'pointer' : 'grab';
+}
+canvas.addEventListener('pointermove', onPointer, { passive:true });
+canvas.addEventListener('click', ev => {
+  const x = (ev.clientX / innerWidth) * 2 - 1;
+  const y = -(ev.clientY / innerHeight) * 2 + 1;
+  pointer.set(x, y);
+  raycaster.setFromCamera(pointer, camera);
+  const hits = raycaster.intersectObjects(stations.map(s => s.pick), false);
+  if (hits.length) selectStage(hits[0].object.userData.stage, true);
+});
+
+document.getElementById('btnPause').addEventListener('click', e => {
+  state.paused = !state.paused;
+  e.target.textContent = state.paused ? 'Resume' : 'Pause';
+  controls.autoRotate = !state.paused;
+});
+document.getElementById('btnReset').addEventListener('click', () => {
+  tokens.forEach(t => scene.remove(t.mesh));
+  tokens.length = 0;
+  state.seen = state.ok = state.bad = 0;
+  state.story = true; state.storyT = 0;
+  selectStage(0, false);
+  state.story = true;
+  updateStats();
+});
+document.getElementById('btnAbout').addEventListener('click', () => {
+  document.getElementById('modal').classList.add('open');
+  state.paused = true;
+  controls.autoRotate = false;
+  document.getElementById('btnPause').textContent = 'Resume';
+});
+document.getElementById('btnClose').addEventListener('click', () => {
+  document.getElementById('modal').classList.remove('open');
+  state.paused = false;
+  controls.autoRotate = true;
+  document.getElementById('btnPause').textContent = 'Pause';
+});
+document.getElementById('modal').addEventListener('click', ev => {
+  if (ev.target.id === 'modal') document.getElementById('btnClose').click();
+});
+addEventListener('keydown', ev => {
+  if (ev.key === 'Escape') document.getElementById('btnClose').click();
+});
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+/* ------------------------------------------------------------------ *
+ *  animation
+ * ------------------------------------------------------------------ */
+const clock = new THREE.Clock();
+let elapsed = 0;
+
+function tick(){
+  requestAnimationFrame(tick);
+  const dt = Math.min(clock.getDelta(), 0.05);
+  if (!state.paused) elapsed += dt;
+
+  // spawn
+  if (!state.paused){
+    spawnAcc += dt;
+    if (spawnAcc > 0.42 && tokens.length < MAX_TOKENS){
+      spawnAcc = 0;
+      makeToken();
+      state.seen++;
+      statsDirty = true;
+    }
+  }
+
+  // tokens
+  for (let i = tokens.length - 1; i >= 0; i--){
+    const tk = tokens[i];
+
+    if (tk.state === 'moving'){
+      if (!state.paused){
+        tk.t += tk.speed * dt * 1.35;
+      }
+      const p = curve.getPointAt(Math.min(tk.t, 1));
+      tk.mesh.position.copy(p);
+      tk.mesh.position.y += Math.sin(elapsed*3 + tk.t*20) * 0.045;
+      tk.mesh.rotation.x += tk.spin * dt;
+      tk.mesh.rotation.y += tk.spin * 0.7 * dt;
+
+      // decide at the validation stage
+      if (!tk.decided && tk.t >= 0.74){
+        tk.decided = true;
+        const pass = Math.random() < (0.25 + tk.patchability*0.75);
+        if (!pass){
+          tk.state = 'dying';
+          tk.mesh.material.color.set(0xFF5D6C);
+          tk.mesh.material.emissive.set(0xFF5D6C);
+          tk.halo.material.color.set(0xFF5D6C);
+          tk.vy = 1.4 + Math.random();
+          state.bad++; statsDirty = true;
+        }
+      }
+
+      if (tk.t >= 1){
+        tk.state = 'shipped';
+        tk.mesh.material.color.set(0x3DDC97);
+        tk.mesh.material.emissive.set(0x3DDC97);
+        tk.mesh.material.emissiveIntensity = 2.6;
+        tk.halo.material.color.set(0x3DDC97);
+        tk.halo.scale.set(2.2, 2.2, 1);
+        state.ok++; statsDirty = true;
+      }
+    }
+
+    if (tk.state === 'dying'){
+      tk.life += dt;
+      tk.vy -= dt * 1.4;
+      tk.mesh.position.y += tk.vy * dt;
+      tk.mesh.rotation.z += dt * 3;
+      const o = Math.max(0, 1 - tk.life/1.5);
+      tk.mesh.material.opacity = o;
+      tk.mesh.material.transparent = true;
+      tk.halo.material.opacity = 0.5 * o;
+      tk.halo.scale.multiplyScalar(0.985);
+      if (tk.life > 1.5){ scene.remove(tk.mesh); tokens.splice(i,1); }
+    }
+
+    if (tk.state === 'shipped'){
+      tk.life += dt;
+      tk.mesh.position.y += dt * 0.55;
+      tk.mesh.position.x += Math.sin(tk.life*2)*0.004;
+      const o = Math.max(0, 1 - tk.life/1.6);
+      tk.mesh.material.opacity = o;
+      tk.mesh.material.transparent = true;
+      tk.halo.material.opacity = 0.5 * o;
+      tk.mesh.scale.setScalar(1 + tk.life*0.6);
+      if (tk.life > 1.6){ scene.remove(tk.mesh); tokens.splice(i,1); }
+    }
+  }
+
+  if (statsDirty){ updateStats(); statsDirty = false; }
+
+  // station pulses
+  stations.forEach((s, i) => {
+    const active = i === state.stage;
+    const base = active ? 1 : 0.86;
+    const pulse = 1 + Math.sin(elapsed*2 + i*1.3) * (active ? 0.05 : 0.015);
+    s.ring.scale.setScalar(base * pulse);
+    s.halo.rotation.z += dt * (active ? 0.6 : 0.2);
+    s.core.material.opacity = (active ? 0.55 : 0.28) + Math.sin(elapsed*2.4 + i) * 0.06;
+    s.light.intensity = (active ? 9 : 5) + Math.sin(elapsed*2 + i)*1.2;
+  });
+
+  // story mode: advance captions
+  if (state.story && !state.paused){
+    state.storyT += dt;
+    if (state.storyT > 4.6){
+      state.storyT = 0;
+      const next = (state.stage + 1) % STAGES.length;
+      selectStage(next, false);
+      state.story = true;
+    }
+  }
+
+  // gentle camera drift
+  const b = Math.sin(elapsed*0.35) * 0.5;
+  camera.position.y = 4.6 + Math.sin(elapsed*0.28) * 0.28;
+  controls.update();
+  renderer.render(scene, camera);
+}
+
+/* ------------------------------------------------------------------ *
+ *  go
+ * ------------------------------------------------------------------ */
+selectStage(0, false);
+state.story = true;
+updateStats();
+setTimeout(() => document.getElementById('loading').classList.add('hide'), 320);
+tick();
+</script>
+
+<script>
+  // If the module never executes (CDN blocked), tell the viewer instead of showing a blank page.
+  setTimeout(() => {
+    const l = document.getElementById('loading');
+    if (l && !l.classList.contains('hide')){
+      l.innerHTML = 'Could not load the 3D library.<br>Check your internet connection and reload.';
+      l.style.textAlign = 'center';
+    }
+  }, 9000);
+</script>
+</body>
+</html>
