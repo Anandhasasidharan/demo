@@ -1,0 +1,9 @@
+$ ./ap_vuln.exe
+input bytes: 2115, first chunk: 54
+step 1 parse(first chunk) -> SUSPENDED
+step 2 resume -> OK
+
+[process exit code: -1073741819]
+
+0xC0000005 - access violation: the process touched memory the guard allocator had already poisoned.
+

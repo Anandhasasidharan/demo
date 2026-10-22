@@ -5,6 +5,7 @@ An interactive walkthrough of an automated vulnerability patching pipeline:
 
 **Live demo:** https://anandhasasidharan.github.io/demo/
 **Technical detail (long form):** https://anandhasasidharan.github.io/demo/details.html
+**Worked case study — CVE-2022-40674:** https://anandhasasidharan.github.io/demo/case.html
 
 **Base paper:** Hore, Shah & Bastian (2023), *Deep VULMAN: A deep reinforcement learning-enabled cyber vulnerability management framework*, Expert Systems with Applications 221:119734.
 DOI: [10.1016/j.eswa.2023.119734](https://doi.org/10.1016/j.eswa.2023.119734)

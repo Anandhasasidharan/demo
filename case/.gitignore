@@ -1,0 +1,6 @@
+src/
+vuln/
+fixed/
+patched/
+*.exe
+*.tar

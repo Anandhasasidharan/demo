@@ -1,0 +1,9 @@
+$ ./ap_fixed.exe
+input bytes: 2115, first chunk: 54
+step 1 parse(first chunk) -> SUSPENDED
+step 2 resume -> OK
+step 3 parse(rest) -> OK
+RESULT: completed without fault (no use-after-free observed)
+
+[process exit code: 0]
+

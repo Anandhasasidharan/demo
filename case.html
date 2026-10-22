@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Case study — CVE-2022-40674 (libexpat): crash, patch, proof</title>
+<meta name="description" content="A reproducible worked example of the validation gate: a real CVE in libexpat, a real crash, the real upstream fix, and before/after evidence." />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23071018'/%3E%3Ccircle cx='16' cy='16' r='7' fill='none' stroke='%233DDC97' stroke-width='2.5'/%3E%3Ccircle cx='16' cy='16' r='2.4' fill='%2338BDF8'/%3E%3C/svg%3E" />
+<style>
+  :root{
+    --bg:#05080F; --panel:#0B1322; --line:#1C2A44; --ink:#E6EDF8; --muted:#93A3BE; --dim:#6C7C97;
+    --blue:#4C8DFF; --violet:#A78BFA; --cyan:#38BDF8; --amber:#FFB454; --green:#3DDC97; --red:#FF5D6C;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:"Segoe UI",system-ui,-apple-system,Inter,Arial,sans-serif;
+    line-height:1.65;-webkit-font-smoothing:antialiased}
+  a{color:#7FB0FF;text-decoration:none;border-bottom:1px solid rgba(127,176,255,.35)}
+  a:hover{border-bottom-color:#7FB0FF}
+  code{background:rgba(90,130,190,.14);border:1px solid rgba(90,130,190,.25);padding:1.5px 6px;border-radius:5px;
+    font-size:.88em;color:#A8C8FF;font-family:"Cascadia Code",Consolas,monospace}
+
+  .topbar{position:sticky;top:0;z-index:20;backdrop-filter:blur(12px);background:rgba(5,8,15,.85);border-bottom:1px solid var(--line)}
+  .topbar .inner{max-width:1100px;margin:0 auto;padding:12px 24px;display:flex;align-items:center;justify-content:space-between;gap:16px}
+  .brand{font-size:13px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+  .brand b{color:var(--ink);letter-spacing:0;text-transform:none;font-size:14px}
+  .navlinks{display:flex;gap:10px}
+  .navlinks a{font-size:12.5px;padding:7px 13px;border-radius:8px;border:1px solid var(--line);color:#CFDCEE;background:rgba(16,28,48,.6)}
+  .navlinks a:hover{background:rgba(30,55,95,.8);color:#fff}
+
+  main{max-width:1100px;margin:0 auto;padding:44px 24px 100px}
+  .kicker{font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--green);margin:0 0 10px}
+  h1{margin:0 0 14px;font-size:clamp(30px,4vw,46px);line-height:1.08;letter-spacing:-.025em}
+  .lede{font-size:17px;color:#B9C8DE;margin:0 0 26px;max-width:760px}
+
+  .facts{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:22px 0 34px}
+  @media(max-width:800px){.facts{grid-template-columns:1fr 1fr}}
+  .fact{background:linear-gradient(180deg,var(--panel),#080F1C);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .fact .v{font-size:20px;font-weight:700;letter-spacing:-.02em}
+  .fact .l{font-size:10px;letter-spacing:.13em;text-transform:uppercase;color:var(--dim);margin-top:3px}
+  .fact.sev .v{color:var(--red)}
+  .fact.ok .v{color:var(--green)}
+
+  section{margin-top:46px}
+  h2{font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:#6E9CE0;margin:0 0 6px;font-weight:700}
+  h2.h{font-size:25px;letter-spacing:-.02em;color:#fff;margin:0 0 14px;line-height:1.25}
+  h3{font-size:16px;margin:22px 0 8px;color:#EAF1FB}
+  p{color:#BECCE1;margin:0 0 12px}
+  ul,ol{color:#BECCE1;padding-left:20px;margin:0 0 14px}
+  li{margin:5px 0}
+
+  pre{background:#070E1A;border:1px solid #17233B;border-radius:11px;padding:16px 18px;overflow-x:auto;
+    font-size:12.6px;line-height:1.6;color:#B7CBE8;margin:12px 0;font-family:"Cascadia Code",Consolas,monospace}
+  .ok{color:#7BE495} .bad{color:#FF8D99} .dim{color:#6C7C97} .am{color:#FFC978}
+
+  table{width:100%;border-collapse:collapse;font-size:13.5px;background:#080F1C;border:1px solid var(--line);
+    border-radius:12px;overflow:hidden;margin:16px 0}
+  th{background:#101B31;color:#9FBBE6;text-align:left;padding:11px 13px;font-size:11px;letter-spacing:.09em;text-transform:uppercase}
+  td{padding:11px 13px;border-top:1px solid #16223A;color:#C3D2E6;vertical-align:top}
+  tr:nth-child(even) td{background:#0A1222}
+  .pass{color:#4ADE80;font-weight:700}
+  .fail{color:#FF6B7A;font-weight:700}
+
+  .callout{border-left:3px solid var(--amber);background:rgba(255,180,84,.06);padding:14px 18px;border-radius:0 10px 10px 0;
+    margin:16px 0;font-size:14px;color:#D8C7A8}
+  .callout.good{border-left-color:var(--green);background:rgba(61,220,151,.06);color:#B8E8D3}
+  .callout.bad{border-left-color:var(--red);background:rgba(255,93,108,.06);color:#F2C0C5}
+  .callout b{color:#fff}
+
+  .steps{counter-reset:s;list-style:none;padding:0;margin:0}
+  .steps > li{counter-increment:s;position:relative;padding-left:46px;margin:26px 0}
+  .steps > li:before{content:counter(s);position:absolute;left:0;top:0;width:30px;height:30px;border-radius:9px;
+    background:rgba(76,141,255,.14);border:1px solid rgba(76,141,255,.4);color:#8FB8FF;
+    display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px}
+  .steps h3{margin:2px 0 8px}
+
+  .dl{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
+  .dl a{font-size:12.5px;padding:8px 13px;border-radius:9px;border:1px solid var(--line);background:#0C1526;border-bottom:1px solid var(--line)}
+  .dl a:hover{background:#152342}
+
+  footer{max-width:1100px;margin:0 auto;padding:26px 24px 60px;border-top:1px solid var(--line);color:var(--dim);
+    font-size:12.5px;display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap}
+  @media print{.topbar,footer{display:none}body{background:#fff;color:#111}pre,table{background:#fff;color:#111}
+    td,th{background:#fff!important;color:#111}h1,h2.h,h3,p,li{color:#111}}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="inner">
+    <div class="brand"><b>Case study</b> · CVE-2022-40674</div>
+    <div class="navlinks">
+      <a href="./index.html">3D demo</a>
+      <a href="./details.html">Technical detail</a>
+      <a href="https://doi.org/10.1016/j.eswa.2023.119734" target="_blank" rel="noopener">Base paper</a>
+    </div>
+  </div>
+</div>
+
+<main>
+  <p class="kicker">Worked example · run on real vulnerable source</p>
+  <h1>One CVE, from crash to proof</h1>
+  <p class="lede">A real use-after-free in libexpat, reproduced against the real vulnerable release, fixed with the real upstream patch, and verified before and after. No mock data. The commands and logs are in the repository.</p>
+
+  <div class="facts">
+    <div class="fact sev"><div class="v">8.1</div><div class="l">CVSS v3.1 · high</div></div>
+    <div class="fact"><div class="v">CWE-416</div><div class="l">use-after-free</div></div>
+    <div class="fact"><div class="v">&lt; 2.4.9</div><div class="l">affected versions</div></div>
+    <div class="fact ok"><div class="v">0 → fixed</div><div class="l">exit code after patch</div></div>
+  </div>
+
+  <div class="callout">
+    <b>Why this CVE.</b> It is small, deterministic, and lives in a library that ships inside countless products
+    (Debian, Fedora, Siemens devices, and everything vendoring expat). The trigger is a 2 KB XML string, so the
+    whole experiment runs in seconds — which is exactly what a demo needs.
+  </div>
+
+  <!-- 1 -->
+  <section>
+    <h2>The vulnerability</h2>
+    <h2 class="h">What goes wrong, in one paragraph</h2>
+    <p>An XML document declares an internal entity whose replacement text contains a comment:</p>
+    <pre><span class="dim">&lt;!DOCTYPE a [&lt;!ENTITY e '&lt;!--COMMENT--&gt;a'&gt;]&gt;</span>
+&lt;a&gt;&amp;e;&lt;b&gt; <span class="am">…a very long tag name…</span> /&gt;&lt;/b&gt;&lt;/a&gt;</pre>
+    <p>The application installs a comment handler and <strong>suspends</strong> the parser from inside it
+    (<code>XML_StopParser</code>), then <strong>resumes</strong> later — a normal pattern for streaming parsers that
+    need to hand control back to the caller.</p>
+    <p>On resume, <code>internalEntityProcessor</code> in <code>xmlparse.c</code> calls <code>doContent()</code>
+    and returns its result <em>without first copying the tag names out of the entity text buffer</em>
+    (<code>storeRawNames</code>). That buffer has already been released during the suspend, so the parser later
+    walks over freed memory. That is the use-after-free.</p>
+  </section>
+
+  <!-- 2 -->
+  <section>
+    <h2>Step 1</h2>
+    <h2 class="h">The crash</h2>
+    <p>Built against libexpat <strong>2.4.8</strong>, compiled with a guard-page allocator (see the honesty note
+    below), and run:</p>
+    <pre>$ ./ap_vuln.exe
+input bytes: 2115, first chunk: 54
+step 1 parse(first chunk) -&gt; <span class="ok">SUSPENDED</span>
+step 2 resume -&gt; <span class="ok">OK</span>
+<span class="bad">[process exit code: -1073741819]</span>
+<span class="bad">0xC0000005 — access violation</span></pre>
+    <p>The fault happens on the third step: the parser is asked to continue with the remainder of the document,
+    reaches into the entity text it no longer owns, and dies. Note what is <em>not</em> printed — the process never
+    reached <code>step 3</code>.</p>
+    <p><a href="./case/evidence/1-vulnerable-2.4.8.txt">raw log</a> ·
+       <a href="./case/driver.c">driver.c</a></p>
+  </section>
+
+  <!-- 3 -->
+  <section>
+    <h2>Step 2</h2>
+    <h2 class="h">The patch</h2>
+    <p>The upstream fix is four lines: after <code>doContent</code> returns successfully, store the raw names
+    before returning. That is all it takes to keep the buffer alive long enough.</p>
+    <pre><span class="dim">@@ -5826,10 +5826,15 @@ internalEntityProcessor(...)</span>
+   {
+     parser-&gt;m_processor = contentProcessor;
+     /* see externalEntityContentProcessor vs contentProcessor */
+<span class="bad">-    return doContent(parser, parser-&gt;m_parentParser ? 1 : 0, parser-&gt;m_encoding,
+-                     s, end, nextPtr,
+-                     (XML_Bool)! parser-&gt;m_parsingStatus.finalBuffer,
+-                     XML_ACCOUNT_DIRECT);</span>
+<span class="ok">+    result = doContent(parser, parser-&gt;m_parentParser ? 1 : 0,
++                       parser-&gt;m_encoding, s, end, nextPtr,
++                       (XML_Bool)! parser-&gt;m_parsingStatus.finalBuffer,
++                       XML_ACCOUNT_DIRECT);
++    if (result == XML_ERROR_NONE) {
++      if (! storeRawNames(parser))
++        return XML_ERROR_NO_MEMORY;
++    }
++    return result;</span>
+   }
+ }</pre>
+    <p><a href="./case/patch.diff">patch.diff</a> — applies cleanly to 2.4.8 with <code>git apply</code>.</p>
+  </section>
+
+  <!-- 4 -->
+  <section>
+    <h2>Step 3</h2>
+    <h2 class="h">The proof</h2>
+    <p>Three builds, one input, same harness:</p>
+    <table>
+      <tr><th>Build</th><th>Result</th><th>Exit code</th></tr>
+      <tr><td>libexpat <strong>2.4.8</strong> (vulnerable)</td><td class="fail">access violation at step 3</td><td>0xC0000005</td></tr>
+      <tr><td>2.4.8 <strong>+ this patch</strong></td><td class="pass">completes, no fault</td><td>0</td></tr>
+      <tr><td>libexpat <strong>2.4.9</strong> (fixed release)</td><td class="pass">completes, no fault</td><td>0</td></tr>
+    </table>
+    <div class="callout good">
+      <b>This is the whole point of the paper.</b> The patch is not accepted because it looks right, or because a
+      model produced it. It is accepted because the crash that existed before it no longer exists after it — and the
+      fixed release behaves identically.
+    </div>
+  </section>
+
+  <!-- 5 -->
+  <section>
+    <h2>Step 4</h2>
+    <h2 class="h">Where this sits in the pipeline</h2>
+    <p>This case exercises the part of the pipeline that most work skips:</p>
+    <table>
+      <tr><th>Stage</th><th>In this case</th></tr>
+      <tr><td>Ingest</td><td>CVE-2022-40674 → CVSS 8.1, CWE-416, affected &lt; 2.4.9 (NVD)</td></tr>
+      <tr><td>Localise</td><td>crash path → <code>internalEntityProcessor</code> / <code>doContent</code>, <code>xmlparse.c</code></td></tr>
+      <tr><td>Generate</td><td><em>reference patch used</em> (see honesty note)</td></tr>
+      <tr><td><strong>Validate</strong></td><td><strong>real</strong>: build, run, crash before, no crash after</td></tr>
+      <tr><td>Ship</td><td>patch + evidence, reviewable as a diff</td></tr>
+    </table>
+    <div class="callout">
+      <b>Honesty note.</b> The patch shown is the upstream fix, used as the reference for what a correct repair
+      looks like. The language-model generator was not run here: this machine has no GPU, and inventing a transcript
+      would defeat the purpose. What <em>is</em> real is everything that usually gets hand-waved — the vulnerable
+      source, the trigger, the fault, the repair, and the before/after evidence. The generator becomes a measured
+      component in the full study (RQ1, RQ2); the gate is what this page proves works.
+    </div>
+  </section>
+
+  <!-- 6 -->
+  <section>
+    <h2>Step 5</h2>
+    <h2 class="h">Reproduce it</h2>
+    <p>Windows (guard-page allocator, no sanitizer needed):</p>
+    <pre>cd case
+powershell -File build.ps1</pre>
+    <p>Linux or macOS (AddressSanitizer does the same job natively):</p>
+    <pre>cd case
+./build.sh</pre>
+    <p>Both scripts clone the tagged source, compile three builds, and print the table above. Expected runtime:
+    under a minute after the clone.</p>
+    <div class="dl">
+      <a href="./case/README.md">case/README</a>
+      <a href="./case/driver.c">driver.c</a>
+      <a href="./case/patch.diff">patch.diff</a>
+      <a href="./case/evidence/1-vulnerable-2.4.8.txt">log · vulnerable</a>
+      <a href="./case/evidence/2-patched-2.4.8-plus-fix.txt">log · patched</a>
+      <a href="./case/evidence/3-fixed-release-2.4.9.txt">log · 2.4.9</a>
+    </div>
+  </section>
+
+  <!-- 7 -->
+  <section>
+    <h2>Limits</h2>
+    <h2 class="h">What this case does not prove</h2>
+    <ul>
+      <li>It does not show the generator working — that is a separate experiment with a GPU and a benchmark.</li>
+      <li>It is one CVE, chosen because it is reproducible; it says nothing about the average success rate.</li>
+      <li>The guard allocator is stricter than production: it turns a silent corruption into a fault. That is what
+          makes it useful as an oracle, but it also means "no fault here" is not a guarantee of correctness — which
+          is why the full pipeline also runs regression tests.</li>
+      <li>Source-level fixes only; no live patching, no binary rewriting.</li>
+    </ul>
+    <p>What it does prove is narrower and more useful: <strong>the validation gate can distinguish a broken build
+    from a fixed one on a real vulnerability, with evidence a reviewer can rerun.</strong></p>
+  </section>
+</main>
+
+<footer>
+  <div>Case study · CVE-2022-40674 · built 22 October 2026</div>
+  <div><a href="./index.html">← 3D demo</a> · <a href="./details.html">technical detail →</a></div>
+</footer>
+
+</body>
+</html>
+

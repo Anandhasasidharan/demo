@@ -1,0 +1,13 @@
+#ifndef EXPAT_CONFIG_H
+#define EXPAT_CONFIG_H 1
+#define XML_CONTEXT_BYTES 1024
+#define XML_DTD 1
+#define XML_NS 1
+#define HAVE_MEMMOVE 1
+#define HAVE_STDLIB_H 1
+#define HAVE_STRING_H 1
+#define HAVE_LIMITS_H 1
+#define HAVE_SNPRINTF 1
+#define HAVE_VSNPRINTF 1
+#define PACKAGE_VERSION "2.4.8"
+#endif
